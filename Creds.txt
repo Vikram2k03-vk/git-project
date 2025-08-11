@@ -1,2 +1,0 @@
-UserName = Vikram
-Password = Vikram111
