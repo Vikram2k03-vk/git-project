@@ -9,6 +9,6 @@ def divide(dividend, divisor):
     finally:
         print("Division attempt completed.")
 
-divide(10, 2)
+#divide(10, 2)
 divide(10, 0)
-divide("abc", 5)
+#divide("abc", 5)
