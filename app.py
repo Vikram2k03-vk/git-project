@@ -4,18 +4,23 @@ import hashlib
 import subprocess
 import tempfile
 import shutil
+import stat
+import logging
 from flask import Flask, request, jsonify, abort
 from dotenv import load_dotenv
 
 # ---------------- Load Environment Variables ----------------
 load_dotenv()
 
-APP_ID = os.getenv("APP_ID")                      # GitHub App ID
+APP_ID = os.getenv("APP_ID")                        # GitHub App ID
 WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET")  # Webhook secret
-PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")  # Path to your private key
+PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")    # Path to your private key
 
 app = Flask(__name__)
 errors = []
+
+# ---------------- Logging Setup ----------------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 # ---------------- Syntax Checker ----------------
@@ -38,18 +43,34 @@ def verify_signature(payload, signature):
     return hmac.compare_digest(expected, signature)
 
 
+# ---------------- Windows-Safe Cleanup ----------------
+def remove_readonly(func, path, _):
+    """Helper for read-only files on Windows."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def safe_rmtree(path):
+    """Safely remove a directory tree."""
+    if os.path.exists(path):
+        shutil.rmtree(path, onerror=remove_readonly)
+
+
 # ---------------- Webhook Endpoint ----------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     signature = request.headers.get("X-Hub-Signature-256")
     if signature is None or not verify_signature(request.data, signature):
+        logging.error("❌ Invalid webhook signature")
         abort(401, "Invalid signature")
 
     payload = request.json
     repo_url = payload["repository"]["clone_url"]
+    logging.info(f"🔄 Received push event from repo: {repo_url}")
 
     # Clone repo into a temporary directory
     temp_dir = tempfile.mkdtemp()
+    logging.info(f"📂 Cloning repository into {temp_dir}")
     subprocess.run(["git", "clone", repo_url, temp_dir], check=True)
 
     # Loop through commits → check added/modified files
@@ -61,15 +82,21 @@ def webhook():
                     error = check_syntax(abs_path)
                     if error:
                         errors.append(error)
+                        logging.error(error)
                     else:
-                        errors.append(f"✅ {file_path}: No errors")
+                        msg = f"✅ {file_path}: No errors"
+                        errors.append(msg)
+                        logging.info(msg)
                 else:
-                    errors.append(f"⚠️ {file_path}: File not found")
+                    msg = f"⚠️ {file_path}: File not found in repo"
+                    errors.append(msg)
+                    logging.warning(msg)
 
     # Cleanup temp folder
-    shutil.rmtree(temp_dir)
+    logging.info(f"🧹 Cleaning up {temp_dir}")
+    safe_rmtree(temp_dir)
 
-    return jsonify({"status": "errors recorded"}), 200
+    return jsonify({"status": "completed", "errors_found": len(errors)}), 200
 
 
 # ---------------- Errors Page ----------------
@@ -80,4 +107,5 @@ def get_errors():
 
 # ---------------- Run Flask ----------------
 if __name__ == "__main__":
+    logging.info("🚀 Starting Flask GitHub App Listener on port 5000")
     app.run(port=5000, debug=True)
