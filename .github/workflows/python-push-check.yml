@@ -1,0 +1,37 @@
+name: Python Code Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Run Python syntax check
+        run: |
+          set -e
+          echo "Checking Python files for syntax errors..."
+          
+          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '\.py$' || true)
+          
+          if [ -z "$FILES" ]; then
+            echo "No Python files to check."
+          else
+            for f in $FILES; do
+              echo "Checking $f"
+              python -m py_compile "$f"
+            done
+          fi
+
